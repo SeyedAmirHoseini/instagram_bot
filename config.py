@@ -14,12 +14,11 @@ TELEGRAM_BOT_USERNAME = "MoviesssBot_bot"
 SESSION_FILE = Path("session.json")
 DB_NAME = "bot_data.db"
 
-# تأخیرها - محتاطانه‌تر
 DELAY_RANGE_REQUESTS = [3, 8]
 DELAY_RANGE_DM = [10, 25]
 DELAY_RANGE_COMMENTS = [40, 90]
 
-CHECK_INTERVAL_COMMENTS = 420  # ۷ دقیقه
+CHECK_INTERVAL_COMMENTS = 420
 POSTS_TO_CHECK = 5
 
 DM_TEMPLATES = [

@@ -1,6 +1,4 @@
-import time
-import random
-import logging
+import time, random, logging
 from database import init_db, get_setting
 from utils.bot import StableInstagramBot
 

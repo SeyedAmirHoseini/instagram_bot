@@ -1,13 +1,10 @@
-# utils/bot.py
 from instagrapi import Client
 from instagrapi.exceptions import *
-import random
-import time
-import logging
-
 from config import *
 from database import get_setting, update_setting, get_item, add_item, is_processed, mark_processed
 from utils.link_processor import process_telegram_link, generate_unique_pk
+import random, time, logging
+
 
 logger = logging.getLogger(__name__)
 
@@ -143,12 +140,12 @@ class StableInstagramBot:
 
     def process_dms(self):
         try:
-            threads = self.cl.direct_threads(amount=8)  # تعداد کم کافیه
+            threads = self.cl.direct_threads(amount=8)  # تعداد کم کافیه چون همون دیلی شدیدی نداره
             for t in threads:
                 user_count = len(t.users)
                 title = getattr(t, 'thread_title', '').strip()
 
-                # شرط طلایی: saved messages وقتی کاربران خالی باشن
+                # توی ترد ها وقتی کاربر تعداش 0 باشه یعنی اکانت خودتونه
                 if user_count == 0:
                     logger.info(f"✅ Saved Messages is detected! Thread ID: {t.id} | Title: '{title}' | Users: 0")
                     msgs = self.cl.direct_messages(t.id, amount=5)  # آخرین ۵ پیام
@@ -185,7 +182,6 @@ class StableInstagramBot:
             self.show_admin_panel(user_id)
             return
 
-        # دستور تنظیم
         if text_lower.startswith("تنظیم ") and len(text.split()) == 3:
             try:
                 parts = text.split()
@@ -214,10 +210,8 @@ class StableInstagramBot:
                 self.send_dm(user_id, "❌ فرمت اشتباه! مثال: تنظیم ۱ ۶۰۰")
             return
 
-        # دستور ثبت - نسخه نهایی با استخراج دقیق start=...
         if text_lower.startswith("ثبت "):
             try:
-                # استخراج محتوا با مدیریت دقیق فاصله‌ها
                 content = text.split("ثبت", 1)[1].strip() if "ثبت" in text else ""
                 logger.info(f"محتوای ثبت دریافتی: {content}")
 
@@ -227,7 +221,6 @@ class StableInstagramBot:
 
                 start_part, name = [x.strip() for x in content.rsplit("-", 1)]
 
-                # استخراج start (انعطاف‌پذیر برای start= و ?start=)
                 start_value = None
                 for prefix in ["start=", "?start="]:
                     if prefix in start_part:
@@ -240,7 +233,6 @@ class StableInstagramBot:
                     self.send_dm(user_id, "❌ مقدار start پیدا نشد!\nلطفاً به این شکل بنویسید:\nثبت start=abc123 - نام فیلم\nیا ثبت ?start=abc123 - نام فیلم")
                     return
 
-                # ساخت لینک کامل
                 full_link = f"https://t.me/{TELEGRAM_BOT_USERNAME}?start={start_value}"
                 logger.info(f"لینک ساخته‌شده: {full_link}")
 
