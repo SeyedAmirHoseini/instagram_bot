@@ -1,10 +1,14 @@
 from instagrapi import Client
 from instagrapi.exceptions import *
+import random
+import time
+import logging
+import requests
+from bs4 import BeautifulSoup
+
 from config import *
 from database import get_setting, update_setting, get_item, add_item, is_processed, mark_processed
 from utils.link_processor import process_telegram_link, generate_unique_pk
-import random, time, logging
-
 
 logger = logging.getLogger(__name__)
 
@@ -13,32 +17,93 @@ class StableInstagramBot:
         self.cl = Client()
         self.cl.delay_range = [4, 12]  # تأخیر کلی بین درخواست‌ها
 
+        # گرفتن آخرین نسخه اینستاگرام اتوماتیک
+        latest_version = self.get_latest_instagram_version()
+        logger.info(f"استفاده از app_version: {latest_version}")
+
+        self.cl.set_device({
+            'app_version': latest_version,           # همیشه آخرین نسخه واقعی
+            'android_version': 15,
+            'android_release': '15.0.0',
+            'dpi': '480dpi',
+            'resolution': '1220x2712',
+            'manufacturer': 'Xiaomi',
+            'device': 'zircon',
+            'model': 'Redmi Note 14 Pro 5G',
+            'cpu': 'arm64-v8a'
+        })
+
         self.logged_in = self._login()
         self.delay_range_dm = [int(get_setting('min_delay_dm', '10')), int(get_setting('max_delay_dm', '25'))]
 
-    def _login(self):
+    def get_latest_instagram_version(self):
+        """آخرین نسخه اینستاگرام اندروید رو اتوماتیک از Uptodown بگیره"""
+        fallback_version = '410.1.0.63.71'  # نسخه فعلی تا دسامبر ۲۰۲۵
+
+        try:
+            url = "https://instagram.en.uptodown.com/android"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                logger.warning(f"صفحه Uptodown باز نشد (کد: {response.status_code})")
+                return fallback_version
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            version_tag = soup.find('div', class_='version')
+            if version_tag:
+                version = version_tag.text.strip()
+                # مطمئن شدن که فرمت درست باشه (مثل 410.1.0.63.71)
+                import re
+                if re.match(r'\d+\.\d+\.\d+\.\d+\.\d+', version):
+                    logger.info(f"آخرین نسخه اینستاگرام پیدا شد: {version}")
+                    return version
+                else:
+                    logger.warning(f"نسخه پیدا شده نامعتبر: {version}")
+                    return fallback_version
+
+            logger.warning("تگ div.version پیدا نشد")
+            return fallback_version
+        except Exception as e:
+            logger.error(f"خطا در گرفتن آخرین نسخه: {e}")
+            return fallback_version
+
+    def _login(self, retry_count=0):
+        max_retries = 2
+
         if SESSION_FILE.exists():
             try:
                 self.cl.load_settings(SESSION_FILE)
                 self.cl.get_timeline_feed()
-                logger.info("Session loaded from file")
+                logger.info("Session loaded successfully")
                 return True
             except Exception as e:
-                logger.warning(f"Session file invalid: {e} → trying fresh login")
+                logger.warning(f"Session load failed: {e}")
+                if retry_count < max_retries:
+                    logger.info(f"Session قدیمی نامعتبر. پاک کردن و تلاش مجدد ({retry_count + 1}/{max_retries})...")
+                    SESSION_FILE.unlink(missing_ok=True)
+                    time.sleep(random.uniform(30, 90))
+                    return self._login(retry_count=retry_count + 1)
 
         try:
-            logger.info("Attempting fresh login with username/password...")
+            logger.info("تلاش fresh login...")
             self.cl.login(USERNAME, PASSWORD)
             self.cl.dump_settings(SESSION_FILE)
-            logger.info("Login successful → session saved")
-            time.sleep(random.uniform(90, 150))  # صبر طولانی بعد لاگین
+            logger.info("Login موفق → session جدید ذخیره شد")
+            time.sleep(random.uniform(90, 150))
             return True
         except ChallengeRequired:
-            logger.error("Challenge Required! باید دستی حل کنی (اپ اینستا)")
+            logger.error("Challenge Required! باید دستی حل کنی.")
             return False
         except Exception as e:
             logger.error(f"Login error: {type(e).__name__} - {e}")
-            return False
+            if retry_count < max_retries:
+                logger.info(f"تلاش مجدد ({retry_count + 1}/{max_retries})...")
+                time.sleep(random.uniform(60, 120))
+                return self._login(retry_count=retry_count + 1)
+            else:
+                logger.critical("حداکثر تلاش‌ها تمام شد.")
+                return False
 
     def send_dm(self, user_id, message):
         try:
@@ -86,8 +151,11 @@ class StableInstagramBot:
             posts_count = int(get_setting('posts_count', '5'))
             logger.info(f"شروع چک {posts_count} پست اخیر فقط با API خصوصی...")
 
-            # مستقیم private API v1 (authorized) - بدون gql
-            medias = self.cl.user_medias_v1(self.cl.user_id, amount=posts_count)
+            try:
+                medias = self.cl.user_medias_v1(self.cl.user_id, amount=posts_count)
+            except Exception as e:
+                logger.warning(f"user_medias_v1 ارور داد: {e} → fallback به user_medias")
+                medias = self.cl.user_medias(self.cl.user_id, amount=posts_count)
 
             if not medias or len(medias) == 0:
                 logger.warning("هیچ پستی پیدا نشد! بررسی کن: پست داری؟ posts_count درست باشه؟")
